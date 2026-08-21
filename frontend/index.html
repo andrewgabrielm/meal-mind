@@ -1,0 +1,1142 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#f5f5f3">
+<title>MealMind — budget-aware meal planner</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icons/icon-192.png">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
+
+<!-- Decide signed-in vs signed-out BEFORE first paint, or the planner flashes
+     on screen for signed-out visitors. MOCK lives here as the single source
+     of truth: true = presentation mode, no backend, no login. -->
+<script>
+window.MOCK = false;
+try {
+  document.documentElement.dataset.auth =
+    (window.MOCK || localStorage.getItem("mm_token")) ? "in" : "out";
+} catch (e) {
+  document.documentElement.dataset.auth = "out";
+}
+</script>
+<style>
+:root{
+  /* off-white + green, Apple-ish minimal */
+  --bg:#f5f5f3;                  /* off-white page */
+  --card:#ffffff;
+  --ink:#1d1d1f;                 /* near-black text */
+  --muted:#6e6e73;               /* secondary text */
+  --line:rgba(0,0,0,.08);        /* hairline */
+  --green:#2f6b45;               /* the one accent */
+  --green-soft:#e9f1ec;
+  --danger:#c0563e;
+  --danger-soft:#f7ebe7;
+  --radius:18px;
+}
+*{box-sizing:border-box;margin:0}
+[hidden]{display:none !important}
+html{color-scheme:light}
+body{font:15px/1.55 -apple-system,BlinkMacSystemFont,"SF Pro Text","Segoe UI",Roboto,sans-serif;
+  background:var(--bg);color:var(--ink);padding-bottom:84px;
+  -webkit-font-smoothing:antialiased}
+header{position:sticky;top:0;z-index:10;background:rgba(245,245,243,.82);
+  backdrop-filter:blur(18px);-webkit-backdrop-filter:blur(18px);
+  border-bottom:1px solid var(--line);
+  padding:calc(env(safe-area-inset-top) + 14px) 20px 12px;
+  display:flex;align-items:baseline;gap:10px}
+header h1{font-size:1.15rem;font-weight:650;letter-spacing:-.02em}
+header .tag{font-size:.72rem;color:var(--muted)}
+main{max-width:760px;margin:0 auto;padding:8px 16px 0}
+.card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);
+  padding:20px;margin:14px 0}
+.card h2{font-size:.95rem;font-weight:650;letter-spacing:-.01em;margin-bottom:12px}
+.card h2 small{color:var(--muted);font-weight:400}
+.row{display:flex;gap:10px;flex-wrap:wrap}
+.field{flex:1;min-width:96px}
+.field label{display:block;font-size:.72rem;color:var(--muted);margin-bottom:4px}
+input,select{width:100%;padding:10px 12px;border:1px solid var(--line);border-radius:12px;
+  background:var(--bg);color:var(--ink);font-size:.95rem;outline-color:var(--green)}
+button{border:0;border-radius:999px;padding:10px 20px;font-size:.92rem;font-weight:600;
+  cursor:pointer;background:var(--green);color:#fff;transition:opacity .15s,transform .1s}
+button:active{transform:scale(.98)}
+button:disabled{opacity:.4}
+button.ghost{background:var(--green-soft);color:var(--green)}
+button.tiny{padding:5px 12px;font-size:.78rem}
+button.warn{background:var(--danger-soft);color:var(--danger)}
+.badge{display:inline-block;font-size:.68rem;font-weight:600;padding:3px 10px;border-radius:999px;
+  background:var(--bg);color:var(--muted)}
+.badge.brand{background:var(--green-soft);color:var(--green)}
+.badge.accent{background:var(--bg);color:var(--muted);border:1px solid var(--line)}
+.badge.danger{background:var(--danger-soft);color:var(--danger)}
+.meals{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:10px}
+.meal{border:1px solid var(--line);border-radius:14px;padding:12px 14px;position:relative;
+  background:var(--card)}
+.meal .course{font-size:.68rem;text-transform:uppercase;letter-spacing:.07em;color:var(--muted)}
+.meal .name{font-weight:600;margin:3px 0 8px;line-height:1.3;letter-spacing:-.01em}
+.meal.locked{border-color:var(--green);box-shadow:0 0 0 1px var(--green)}
+.lock{position:absolute;top:8px;right:8px;background:none;color:var(--muted);
+  font-size:1rem;padding:2px 6px}
+.meal.locked .lock{color:var(--green)}
+table{width:100%;border-collapse:collapse;font-size:.86rem}
+th{font-size:.68rem;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);
+  font-weight:600;text-align:left;padding:6px 8px;border-bottom:1px solid var(--line)}
+td{padding:8px;border-bottom:1px solid var(--line);vertical-align:top}
+td.num,th.num{text-align:right;font-variant-numeric:tabular-nums}
+tr:last-child td{border-bottom:0}
+.scroll{overflow-x:auto}
+.totals{display:flex;gap:22px;flex-wrap:wrap;align-items:center}
+.totals .big{font-size:1.7rem;font-weight:700;letter-spacing:-.03em}
+.totals .lbl{font-size:.7rem;color:var(--muted)}
+.meter{height:6px;border-radius:99px;background:rgba(0,0,0,.07);overflow:hidden;margin-top:6px}
+.meter i{display:block;height:100%;background:var(--green);border-radius:99px}
+.meter.warn i{background:var(--danger)}
+.urg{display:flex;align-items:center;gap:8px}
+.urg .meter{flex:1;margin:0}
+.urg.high .meter i{background:var(--danger)}
+nav{position:fixed;bottom:0;left:0;right:0;display:flex;
+  background:rgba(255,255,255,.82);backdrop-filter:blur(18px);-webkit-backdrop-filter:blur(18px);
+  border-top:1px solid var(--line);padding-bottom:env(safe-area-inset-bottom)}
+nav button{flex:1;background:none;color:var(--muted);border-radius:0;padding:11px 0 9px;
+  font-size:.72rem;font-weight:600;display:flex;flex-direction:column;gap:2px;align-items:center}
+nav button.active{color:var(--green)}
+nav button span{font-size:1.15rem}
+.screen{display:none}.screen.active{display:block}
+.empty{color:var(--muted);font-size:.88rem;padding:8px 0}
+.note{font-size:.78rem;color:var(--muted);margin-top:8px}
+dialog{border:0;border-radius:var(--radius);background:var(--card);color:var(--ink);
+  max-width:420px;width:calc(100vw - 40px);padding:20px;
+  box-shadow:0 24px 60px rgba(0,0,0,.18)}
+dialog::backdrop{background:rgba(0,0,0,.28);backdrop-filter:blur(3px)}
+.ticklist{max-height:46vh;overflow-y:auto;margin:10px 0}
+.tick{display:flex;align-items:center;gap:10px;padding:8px 2px;border-bottom:1px solid var(--line)}
+.tick:last-child{border-bottom:0}
+.tick input[type=checkbox]{width:18px;height:18px;flex:none;accent-color:var(--green)}
+.tick .cm{flex:1;text-transform:capitalize}
+.tick input[type=number]{width:84px;flex:none}
+.spin{display:inline-block;width:16px;height:16px;border:2px solid var(--green-soft);
+  border-top-color:var(--green);border-radius:50%;animation:sp .8s linear infinite;vertical-align:-3px}
+@keyframes sp{to{transform:rotate(360deg)}}
+#toast{position:fixed;left:50%;bottom:92px;transform:translateX(-50%);background:rgba(29,29,31,.92);
+  color:#fff;padding:10px 18px;border-radius:999px;font-size:.85rem;opacity:0;
+  transition:opacity .25s;pointer-events:none;z-index:40;max-width:90vw;text-align:center;
+  backdrop-filter:blur(10px)}
+#toast.show{opacity:1}
+.cap{text-transform:capitalize}
+.src{font-size:.6rem;font-weight:700;letter-spacing:.04em;text-transform:uppercase;
+  padding:2px 7px;border-radius:999px;white-space:nowrap}
+.src.live{background:var(--green);color:#fff}
+.src.cache{background:var(--green-soft);color:var(--green)}
+.src.seed{background:var(--bg);color:var(--muted);border:1px solid var(--line)}
+.cooked-btn{display:flex;align-items:center;gap:7px;width:100%;margin-top:9px;
+  background:var(--bg);color:var(--muted);border:1px solid var(--line);
+  border-radius:10px;padding:7px 10px;font-size:.76rem;font-weight:600}
+.cooked-btn .box{width:15px;height:15px;border:1.5px solid var(--muted);border-radius:4px;
+  flex:none;display:flex;align-items:center;justify-content:center;font-size:.66rem;color:#fff}
+.meal.done{background:var(--green-soft);border-color:var(--green)}
+.meal.done .name{color:var(--green)}
+.meal.done .cooked-btn{background:var(--green);color:#fff;border-color:var(--green)}
+.meal.done .cooked-btn .box{background:#fff;border-color:#fff;color:var(--green)}
+
+/* ---------- auth screen ---------- */
+/* pre-paint gate: no flash of the planner for signed-out visitors */
+html[data-auth="out"] #scr-plan,
+html[data-auth="out"] #scr-pantry,
+html[data-auth="out"] #scr-settings,
+html[data-auth="out"] nav,
+html[data-auth="out"] header{display:none}
+html[data-auth="out"] #scr-auth{display:flex}
+html[data-auth="out"] body{padding-bottom:0}
+html[data-auth="out"] main{padding:0}
+body.auth main{padding:0}
+body.auth{padding-bottom:0}
+
+#scr-auth.active{display:flex}
+#scr-auth{flex-direction:column;justify-content:center;align-items:center;
+  min-height:100vh;min-height:100dvh;padding:calc(env(safe-area-inset-top) + 28px) 20px calc(env(safe-area-inset-bottom) + 20px)}
+.auth-col{width:100%;max-width:380px}
+.auth-mark{width:56px;height:56px;border-radius:14px;display:block;margin:0 auto 14px}
+.auth-name{font-size:1.5rem;font-weight:650;letter-spacing:-.03em;text-align:center}
+.auth-prop{color:var(--muted);font-size:.92rem;text-align:center;line-height:1.45;
+  max-width:300px;margin:6px auto 22px}
+.auth-points{display:flex;flex-direction:column;gap:7px;margin-bottom:24px;
+  font-size:.84rem;color:var(--muted)}
+.auth-points div{display:flex;gap:9px;align-items:flex-start}
+.auth-points b{color:var(--green);font-weight:700;flex:none}
+/* segmented mode control — states the choice before you type */
+.seg{display:flex;background:var(--bg);border:1px solid var(--line);
+  border-radius:999px;padding:3px;margin-bottom:18px}
+.seg button{flex:1;border-radius:999px;padding:8px 0;font-size:.85rem;
+  background:none;color:var(--muted)}
+.seg button[aria-selected="true"]{background:var(--green-soft);color:var(--green)}
+#auth-form{display:flex;flex-direction:column;gap:12px}
+#auth-form input{background:#fff}      /* fields sit directly on --bg here */
+.pw-wrap{position:relative}
+.pw-wrap input{padding-right:66px}
+.pw-toggle{position:absolute;right:5px;top:50%;transform:translateY(-50%);
+  background:none;color:var(--muted);font-size:.72rem;font-weight:600;padding:6px 10px}
+.err{font-size:.75rem;color:var(--danger);margin-top:5px}
+input.bad{border-color:var(--danger);outline-color:var(--danger)}
+.banner{background:var(--danger-soft);color:var(--danger);border-radius:12px;
+  padding:10px 12px;font-size:.82rem}
+.banner button{background:none;color:var(--danger);text-decoration:underline;
+  padding:0 0 0 4px;font-size:.82rem}
+#btn-auth{width:100%;margin-top:2px}
+#btn-auth .spin{border-color:rgba(255,255,255,.35);border-top-color:#fff;margin-right:6px}
+.auth-foot{font-size:.7rem;color:var(--muted);text-align:center;margin-top:26px}
+.auth-demo{display:block;margin:10px auto 0;background:none;color:var(--muted);
+  font-size:.72rem;font-weight:600;padding:6px 10px}
+button:focus-visible,input:focus-visible{outline:2px solid var(--green);outline-offset:2px}
+@keyframes fadeUp{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+.enter{animation:fadeUp .22s ease-out}
+@media (prefers-reduced-motion:reduce){.enter{animation:none}.spin{animation-duration:2s}}
+</style>
+</head>
+<body>
+<header>
+  <h1>🥘 MealMind</h1>
+  <span class="tag" id="modeTag"></span>
+</header>
+
+<main>
+<!-- ============ AUTH ============ -->
+<section class="screen" id="scr-auth">
+  <div class="auth-col">
+    <img class="auth-mark" src="icons/icon-192.png" width="56" height="56" alt="">
+    <h1 class="auth-name" id="auth-name">MealMind</h1>
+    <p class="auth-prop">Indian home meals planned to a budget you set — and to the food already in your kitchen.</p>
+
+    <div class="auth-points">
+      <div><b>✓</b><span>Set a budget. The plan never goes over it.</span></div>
+      <div><b>✓</b><span>One shopping list, solved for real pack sizes.</span></div>
+      <div><b>✓</b><span>Cooks what's about to spoil, before it does.</span></div>
+    </div>
+
+    <div class="seg" role="tablist" aria-label="Sign in or create an account">
+      <button type="button" id="seg-in" role="tab" aria-selected="true">Sign in</button>
+      <button type="button" id="seg-up" role="tab" aria-selected="false">Create account</button>
+    </div>
+
+    <form id="auth-form" novalidate aria-labelledby="auth-name">
+      <div class="field">
+        <label for="a-email">Email</label>
+        <input id="a-email" type="email" placeholder="you@example.com" autocomplete="email"
+               inputmode="email" autocapitalize="off" autocorrect="off" spellcheck="false"
+               enterkeyhint="next">
+        <p class="err" id="e-email" aria-live="polite"></p>
+      </div>
+
+      <div class="field">
+        <label for="a-password">Password <span class="note" id="pw-hint" hidden
+          style="margin:0">· at least 8 characters</span></label>
+        <div class="pw-wrap">
+          <input id="a-password" type="password" autocomplete="current-password" enterkeyhint="go">
+          <button type="button" class="pw-toggle" id="pw-toggle"
+                  aria-pressed="false" aria-label="Show password">Show</button>
+        </div>
+        <p class="err" id="e-password" aria-live="polite"></p>
+      </div>
+
+      <div class="field" id="a-name-field" hidden>
+        <label for="a-name">Household name</label>
+        <input id="a-name" placeholder="The Sharmas" autocomplete="name">
+        <p class="note" style="margin-top:5px">Optional — it's what the app calls your kitchen.</p>
+      </div>
+
+      <p class="banner" id="a-banner" role="alert" hidden></p>
+      <button id="btn-auth" type="submit">Sign in</button>
+    </form>
+
+    <p class="auth-foot">MDS482-4 · Christ University</p>
+    <button type="button" class="auth-demo" id="btn-demo" hidden>Use the demo account</button>
+  </div>
+</section>
+
+<!-- ============ PLAN ============ -->
+<section class="screen active" id="scr-plan">
+  <div class="card" id="intro-card" hidden>
+    <h2>Start with a plan, not a pantry</h2>
+    <p class="note">You don't need to enter what you own first. Set a budget below and
+      generate a plan — you'll get a shopping list, then tick off whatever you already
+      have and the list re-solves. The menu won't change when you tick; only the list
+      gets shorter.</p>
+    <div class="row" style="margin-top:12px"><button class="ghost" id="btn-intro-ok">Got it</button></div>
+  </div>
+
+  <div class="card">
+    <h2>Plan your meals <small>— shop once, waste nothing</small></h2>
+    <div class="row">
+      <div class="field"><label>Budget (₹)</label><input id="f-budget" type="number" value="1200" min="50"></div>
+      <div class="field"><label>Days</label>
+        <select id="f-days"><option>1</option><option>2</option><option selected>3</option><option>4</option><option>5</option><option>6</option><option>7</option></select></div>
+      <div class="field"><label>Family size</label><input id="f-family" type="number" value="4" min="1" max="12"></div>
+    </div>
+    <div class="row" style="margin-top:10px">
+      <div class="field"><label>Diet</label>
+        <select id="f-diet">
+          <option value="">Use saved preference</option>
+          <option value="vegetarian">Vegetarian</option>
+          <option value="vegan">Vegan</option>
+          <option value="eggetarian">Eggetarian</option>
+          <option value="non_vegetarian">Non-vegetarian</option>
+        </select></div>
+      <div class="field"><label>Non-veg meals (max)</label>
+        <select id="f-nonveg">
+          <option value="">No limit</option>
+          <option value="0">0 — veg-only this plan</option>
+          <option value="1">1</option><option value="2">2</option>
+          <option value="3">3</option><option value="4">4</option>
+          <option value="5">5</option><option value="6">6</option>
+        </select></div>
+    </div>
+    <p class="note">The limit counts meat &amp; fish meals across the whole plan — e.g. non-veg twice a week. Egg dishes follow the diet choice.</p>
+    <div class="row" style="margin-top:10px;align-items:center">
+      <button id="btn-generate">Generate plan</button>
+      <span id="gen-status" class="note"></span>
+    </div>
+  </div>
+
+  <div id="plan-result" hidden>
+    <div class="card">
+      <div class="totals">
+        <div><div class="big" id="t-spent"></div><div class="lbl" id="t-spent-lbl">to spend of <span id="t-budget"></span> budget</div>
+          <div class="meter" id="t-meter"><i></i></div></div>
+        <div><div class="big" id="t-surplus"></div><div class="lbl" id="t-surplus-lbl">value of pack surplus</div></div>
+        <div><span class="badge brand" id="t-planner"></span> <span class="badge brand" id="t-within"></span></div>
+      </div>
+      <p class="banner" id="afford-warn" role="alert" hidden style="margin-top:12px"></p>
+      <div class="row" style="margin-top:12px">
+        <button class="ghost" id="btn-tick">✓ I already have some of this…</button>
+        <button class="ghost" id="btn-swap">⇄ Swap unlocked meals</button>
+      </div>
+      <p class="note">Tap 🔓 on a meal to lock it before swapping. Ticking pantry items never changes the menu — it only shrinks the shopping list.</p>
+    </div>
+
+    <div class="card"><h2>Meals</h2><div class="meals" id="meals"></div></div>
+
+    <div class="card">
+      <h2>Shopping list <small id="sl-note"></small></h2>
+      <div class="scroll"><table id="shop-table">
+        <thead><tr><th>Item</th><th class="num">Need</th><th class="num">Buy</th>
+          <th class="num">Surplus</th><th class="num">₹</th><th>Price from</th>
+          <th>Price signal</th></tr></thead>
+        <tbody></tbody>
+      </table></div>
+      <p class="note">Surplus = what fixed pack sizes force you to buy beyond the recipes' needs. The 48-hour plan below is built to cook it. Price signals are ARIMA/GARCH advisories from 30 years of price history — they never change the budget math.</p>
+    </div>
+
+    <div class="card"><h2>Use-it-up: next 48 hours</h2><div id="leftover"></div></div>
+
+    <div class="row">
+      <div class="card" style="flex:1;min-width:240px"><h2>Variety <small>(Shannon entropy)</small></h2>
+        <div id="variety"></div></div>
+      <div class="card" style="flex:1;min-width:240px"><h2>Spoilage risk <small>(next 48 h)</small></h2>
+        <div id="risk"></div></div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ PANTRY ============ -->
+<section class="screen" id="scr-pantry">
+  <div class="card">
+    <h2>Add to pantry</h2>
+    <div class="row">
+      <div class="field" style="flex:2"><label>Item</label><input id="p-commodity" list="commodities" placeholder="e.g. spinach"></div>
+      <div class="field"><label>Grams</label><input id="p-qty" type="number" value="250" min="1"></div>
+      <div class="field"><label>Storage</label>
+        <select id="p-storage"><option>room</option><option>fridge</option><option>freezer</option></select></div>
+    </div>
+    <div class="row" style="margin-top:10px"><button id="btn-add-pantry">Add item</button></div>
+    <datalist id="commodities"></datalist>
+  </div>
+  <div class="card">
+    <h2>Your pantry <small>— urgency from the Bayesian decay model</small></h2>
+    <div id="pantry-list"><div class="empty">Loading…</div></div>
+    <p class="note">“Spoiled” / “Used up” report the outcome to the model — it learns your kitchen’s real shelf lives (conjugate posterior update).</p>
+  </div>
+</section>
+
+<!-- ============ SETTINGS ============ -->
+<section class="screen" id="scr-settings">
+  <div class="card">
+    <h2>Household preferences</h2>
+    <div class="row">
+      <div class="field"><label>Diet</label>
+        <select id="s-diet"><option value="vegetarian">Vegetarian</option><option value="vegan">Vegan</option>
+          <option value="eggetarian">Eggetarian</option><option value="non_vegetarian">Non-vegetarian</option></select></div>
+      <div class="field"><label>Region</label>
+        <select id="s-region"><option value="">Any</option><option value="north">North</option>
+          <option value="south">South</option><option value="east">East</option><option value="west">West</option></select></div>
+    </div>
+    <div class="row" style="margin-top:10px">
+      <div class="field"><label>Max cooking time (min)</label><input id="s-time" type="number" value="60" min="10"></div>
+      <div class="field"><label>Family size</label><input id="s-family" type="number" value="4" min="1"></div>
+    </div>
+    <div class="field" style="margin-top:10px"><label>Dislikes (comma-separated commodities)</label>
+      <input id="s-dislikes" placeholder="bitter_gourd, brinjal"></div>
+    <div class="row" style="margin-top:12px"><button id="btn-save-prefs">Save preferences</button></div>
+  </div>
+  <div class="card">
+    <h2>Account</h2>
+    <p class="note" id="acct-info">…</p>
+    <div class="row" style="margin-top:10px"><button class="warn" id="btn-logout">Sign out</button></div>
+  </div>
+  <div class="card">
+    <h2>About</h2>
+    <p class="note">MealMind plans Indian home meals under a hard budget using two integer
+    programs (pack sizes &amp; 48-hour surplus use), a Bayesian Weibull spoilage model,
+    Shannon-entropy variety enforcement and ARIMA/GARCH price advisories.
+    MDS482-4 · Christ University.</p>
+    <p class="note" id="about-backend"></p>
+  </div>
+</section>
+</main>
+
+<!-- pantry-tick dialog (plan-first flow) -->
+<!-- recipe sheet: tap a meal card to open -->
+<dialog id="dlg-recipe">
+  <h2 style="font-size:1.05rem;letter-spacing:-.01em" id="r-name"></h2>
+  <p class="note" id="r-meta" style="margin-top:2px"></p>
+  <h3 style="font-size:.78rem;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);margin:14px 0 6px">Ingredients <span id="r-for"></span></h3>
+  <div id="r-ings"></div>
+  <h3 style="font-size:.78rem;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);margin:14px 0 6px">Method</h3>
+  <ol id="r-steps" style="font-size:.9rem;padding-left:20px;display:flex;flex-direction:column;gap:6px"></ol>
+  <p class="note" id="r-src"></p>
+  <div class="row" style="justify-content:space-between;margin-top:14px">
+    <button id="r-cooked" type="button">I made this</button>
+    <button class="ghost" onclick="document.getElementById('dlg-recipe').close()">Close</button>
+  </div>
+</dialog>
+
+<dialog id="dlg-tick">
+  <h2 style="font-size:1rem">What do you already have?</h2>
+  <p class="note">Everything this plan needs. Tick what's in your kitchen and set the amount —
+    ticked items go into your pantry. Unticking removes them. The menu never changes.</p>
+  <input id="tick-search" placeholder="Filter…" style="margin:10px 0 0"
+         autocapitalize="off" autocorrect="off" spellcheck="false">
+  <div class="row" style="gap:6px;margin-top:8px">
+    <button type="button" class="tiny ghost" id="tick-all">Tick all</button>
+    <button type="button" class="tiny ghost" id="tick-none">Untick all</button>
+  </div>
+  <div class="ticklist" id="ticklist"></div>
+  <p class="note" id="tick-count" style="margin-top:0"></p>
+  <div class="row" style="justify-content:flex-end">
+    <button class="ghost" onclick="document.getElementById('dlg-tick').close()">Cancel</button>
+    <button id="btn-apply-ticks">Apply</button>
+  </div>
+</dialog>
+
+<nav>
+  <button class="active" data-scr="plan"><span>🍽️</span>Plan</button>
+  <button data-scr="pantry"><span>🧺</span>Pantry</button>
+  <button data-scr="settings"><span>⚙️</span>Settings</button>
+</nav>
+<div id="toast"></div>
+
+<script>
+/* ================= MOCK =================
+   Set in the <head> so the signed-in/out decision happens before first paint.
+   true  -> fully offline presentation mode, no backend and no login.
+   false -> live API (backend on port 8000 of the same host). */
+const MOCK = window.MOCK;
+
+const API = `${location.protocol}//${location.hostname}:8000/api/v1`;
+
+/* ---------- mock fixtures (presentation mode) ---------- */
+const MOCK_PLAN = {
+  plan_id: 1, planner: "heuristic", days: 2, family_size: 4,
+  meals: [
+    {day:1,course:"breakfast",recipe_id:3,recipe_name:"Aloo Paratha",cluster:"potato",time_mins:40,locked:false,
+     ingredients:[{commodity:"potato",grams:400},{commodity:"wheat_flour",grams:300},{commodity:"curd",grams:100},{commodity:"ghee",grams:40}],
+     instructions:"Knead a soft dough and rest it. Mash the boiled potatoes with spices, stuff, roll and roast on a hot tawa with ghee until golden. Serve with curd."},
+    {day:1,course:"lunch",recipe_id:19,recipe_name:"Tomato Rasam with Rice",cluster:"mixed_veg",time_mins:30,locked:false,
+     ingredients:[{commodity:"tomato",grams:300},{commodity:"rice",grams:300},{commodity:"tamarind",grams:25}],
+     instructions:"Crush tomatoes into tamarind water with rasam powder and simmer until frothy. Temper cumin and mustard seeds, pour over, serve with rice."},
+    {day:1,course:"dinner",recipe_id:10,recipe_name:"Palak Paneer",cluster:"paneer",time_mins:40,locked:false,
+     ingredients:[{commodity:"spinach",grams:500},{commodity:"paneer",grams:250},{commodity:"onion",grams:120},{commodity:"tomato",grams:100}],
+     instructions:"Blanch and purée the spinach. Cook the onion-tomato masala, add the purée and garam masala, then simmer the paneer cubes for five minutes."},
+    {day:2,course:"breakfast",recipe_id:1,recipe_name:"Kanda Poha",cluster:"rice_dish",time_mins:20,locked:false,
+     ingredients:[{commodity:"poha",grams:250},{commodity:"onion",grams:150},{commodity:"potato",grams:100},{commodity:"groundnut",grams:30}],
+     instructions:"Rinse the poha. Temper mustard seeds and curry leaves, fry peanuts, onion and potato, add turmeric, fold in the poha and steam briefly. Finish with lemon."},
+    {day:2,course:"lunch",recipe_id:17,recipe_name:"Curd Rice",cluster:"mixed_veg",time_mins:20,locked:false,
+     ingredients:[{commodity:"curd",grams:400},{commodity:"rice",grams:300},{commodity:"milk",grams:100}],
+     instructions:"Mash soft-cooked rice with milk, fold in whisked curd and salt, and pour over a tempering of mustard seeds, urad dal, ginger and curry leaves."},
+    {day:2,course:"dinner",recipe_id:9,recipe_name:"Dal Tadka",cluster:"legume",time_mins:35,locked:false,
+     ingredients:[{commodity:"toor_dal",grams:250},{commodity:"tomato",grams:150},{commodity:"onion",grams:100}],
+     instructions:"Pressure-cook the dal with turmeric and whisk smooth. Add the sautéed onion-tomato base, simmer, and finish with a ghee tadka of cumin."}],
+  shopping_list: [
+    {commodity:"paneer",required_g:250,pantry_g:0,bought_g:400,surplus_g:150,cost_rs:176,packs:[{pack_size_g:200,unit_price_rs:88,count:2}],price_source:"seed",trend_pct:1.2,volatility_pct:4.1,advice:"normal",optional_dropped:false},
+    {commodity:"tomato",required_g:750,pantry_g:300,bought_g:500,surplus_g:50,cost_rs:15,packs:[{pack_size_g:500,unit_price_rs:15,count:1}],price_source:"seed",trend_pct:2.97,volatility_pct:24.7,advice:"buy_now",optional_dropped:false},
+    {commodity:"poha",required_g:250,pantry_g:0,bought_g:500,surplus_g:250,cost_rs:42,packs:[{pack_size_g:500,unit_price_rs:42,count:1}],price_source:"seed",trend_pct:null,volatility_pct:null,advice:null,optional_dropped:false},
+    {commodity:"onion",required_g:410,pantry_g:700,bought_g:0,surplus_g:290,cost_rs:0,packs:[],price_source:"seed",trend_pct:-0.4,volatility_pct:14.2,advice:"normal",optional_dropped:false},
+    {commodity:"ghee",required_g:65,pantry_g:0,bought_g:180,surplus_g:115,cost_rs:125,packs:[{pack_size_g:180,unit_price_rs:125,count:1}],price_source:"seed",trend_pct:1.37,volatility_pct:8.8,advice:"normal",optional_dropped:false}],
+  totals: {budget_rs:1200, spent_rs:893, within_budget:true, surplus_value_rs:214},
+  variety: {entropy_bits:2.25,max_entropy_bits:2.81,normalised_entropy:0.80,attainable_clusters:7,penalties_engaged:false,
+    distribution:{legume:.29,mixed_veg:.24,paneer:.14,potato:.14,rice_dish:.10,leafy_green:.09}},
+  decay: {horizon_days:2, forced_commodities:["spinach"], items:[
+    {pantry_item_id:1,commodity:"spinach",item_class:"leafy_green",storage:"fridge",age_days:3,survival:.82,urgency:.55,forced_include:true,alpha_days:2.5,learned_from_observations:false},
+    {pantry_item_id:2,commodity:"tomato",item_class:"vegetable",storage:"fridge",age_days:4,survival:.93,urgency:.29,forced_include:false,alpha_days:5,learned_from_observations:false},
+    {pantry_item_id:3,commodity:"milk",item_class:"dairy_fresh",storage:"fridge",age_days:1,survival:.97,urgency:.18,forced_include:false,alpha_days:2,learned_from_observations:false}]},
+  leftover_plan: [{recipe_id:20,recipe_name:"Moong Dal Khichdi",urgency_value:3.4,uses:{rice:200,moong_dal:150,green_peas:80}},
+                  {recipe_id:13,recipe_name:"Aloo Gobi",urgency_value:2.1,uses:{potato:300,cauliflower:400}}]
+};
+const MOCK_PANTRY = MOCK_PLAN.decay.items.map(d=>({id:d.pantry_item_id,commodity:d.commodity,
+  quantity_g:[500,300,500][d.pantry_item_id-1]||250,item_class:d.item_class,storage:d.storage,purchased_on:"2026-08-01"}));
+const MOCK_PREFS = {diet:"vegetarian",region:"",max_cook_mins:60,dislikes:[],family_size:4};
+
+const COMMODITIES = ["rice","poha","wheat_flour","semolina","besan","toor_dal","moong_dal","chana_dal",
+"urad_dal","masoor_dal","rajma","chickpeas","green_peas","groundnut","onion","tomato","potato","spinach",
+"fenugreek_leaves","cauliflower","cabbage","brinjal","okra","bottle_gourd","bitter_gourd","ridge_gourd",
+"pumpkin","carrot","beans","capsicum","beetroot","radish","drumstick","cucumber","banana","coconut",
+"ginger","garlic","green_chilli","coriander_leaves","mint","curry_leaves","lemon","tamarind","milk",
+"curd","paneer","ghee","butter","egg","chicken","mutton","fish","sunflower_oil","mustard_oil","salt",
+"sugar","jaggery","turmeric","red_chilli_powder","coriander_powder","cumin_seeds","mustard_seeds",
+"garam_masala","tea"];
+
+/* ---------- tiny helpers ---------- */
+const $ = s => document.querySelector(s);
+const el = (t, cls, html) => {const e=document.createElement(t); if(cls)e.className=cls; if(html!=null)e.innerHTML=html; return e;};
+const rs = n => "₹" + Math.round(n).toLocaleString("en-IN");
+const cap = s => s.replaceAll("_"," ");
+function toast(msg){const t=$("#toast");t.textContent=msg;t.classList.add("show");
+  clearTimeout(t._h);t._h=setTimeout(()=>t.classList.remove("show"),2600);}
+
+async function api(path, opts={}){
+  if (MOCK) return mockApi(path, opts);
+  const headers={"Content-Type":"application/json"};
+  if (state.token) headers["Authorization"]="Bearer "+state.token;
+
+  let res;
+  const ctl = typeof AbortController!=="undefined" ? new AbortController() : null;
+  // plan generation solves two integer programs, so allow a generous ceiling —
+  // but never none, or a hung server leaves the UI stuck mid-request forever
+  const timer = ctl ? setTimeout(()=>ctl.abort(), 120000) : null;
+  try{
+    res = await fetch(API+path, {headers,...opts, signal: ctl && ctl.signal});
+  }catch(e){                                   // DNS refused, offline, or timed out
+    const err=new Error(e && e.name==="AbortError"
+      ? "MealMind took too long to respond. Try again."
+      : "Can't reach MealMind. Check your connection and try again.");
+    err.offline=true; throw err;
+  }finally{
+    if(timer) clearTimeout(timer);
+  }
+
+  if (res.status===401 && !path.startsWith("/auth/")){
+    logout("Your session expired — please sign in again.");
+    const err=new Error("session expired"); err.auth=true; throw err;
+  }
+  if (!res.ok){
+    // FastAPI sends `detail` as a STRING for our HTTPExceptions but as an
+    // ARRAY of {loc,msg} for Pydantic 422s — flatten both, or the user sees
+    // "[object Object]".
+    let msg=`Something went wrong (${res.status}).`, field=null;
+    try{
+      const d=(await res.json()).detail;
+      if (typeof d==="string") msg=d;
+      else if (Array.isArray(d) && d.length){
+        field=d[0].loc && d[0].loc[d[0].loc.length-1];
+        msg = field==="email" ? "That doesn't look like an email address."
+            : field==="password" ? "Use at least 8 characters."
+            : (d.map(x=>x.msg).join("; ") || msg);
+      }
+    }catch(e){}
+    const err=new Error(msg); err.status=res.status; err.field=field; throw err;
+  }
+  return res.status===204 ? null : res.json();
+}
+function mockApi(path){
+  const j = x => Promise.resolve(JSON.parse(JSON.stringify(x)));
+  if (path.startsWith("/plans/generate")) return j(MOCK_PLAN);
+  if (path.match(/\/plans\/\d+\/pantry/)) {const p=JSON.parse(JSON.stringify(MOCK_PLAN));
+    p.totals.spent_rs=Math.round(p.totals.spent_rs*0.8);return j(p);}
+  if (path.match(/\/plans\/\d+\/swap/)) {const p=JSON.parse(JSON.stringify(MOCK_PLAN));
+    p.meals=p.meals.map((m,i)=>state.locks.has(m.day+"|"+m.course)?{...m,locked:true}
+      :{...m,recipe_name:["Bhindi Masala","Chole Masala","Masala Dosa","Veg Pulao","Matar Paneer","Baingan Bharta"][i],recipe_id:100+i});
+    return j(p);}
+  if (path.startsWith("/pantry/decay")) return j(MOCK_PLAN.decay);
+  if (path.startsWith("/pantry") && path.includes("spoilage")) return j({recorded:true});
+  if (path.startsWith("/pantry")) return j(MOCK_PANTRY);
+  if (path.startsWith("/preferences")) return j(MOCK_PREFS);
+  return j({});
+}
+
+/* ---------- state ---------- */
+function readUser(){                      // self-healing: bad JSON must not
+  try{ return JSON.parse(localStorage.getItem("mm_user")||"null"); }
+  catch(e){ localStorage.removeItem("mm_user"); return null; }   // kill the script
+}
+function readToken(){
+  try{ return localStorage.getItem("mm_token"); }catch(e){ return null; }
+}
+const state = {plan:null, locks:new Set(),
+               token: MOCK ? "mock" : readToken(),
+               user: MOCK ? null : readUser()};
+
+/* ---------- auth ---------- */
+let registerMode=false, authBusy=false;
+
+function showAuth(){
+  document.documentElement.dataset.auth="out";
+  document.body.classList.add("auth");
+  document.querySelectorAll(".screen").forEach(s=>s.classList.remove("active"));
+  $("#scr-auth").classList.add("active");
+  document.querySelector("nav").style.display="none";
+  document.querySelector("header").style.display="none";
+}
+function showApp(){
+  document.documentElement.dataset.auth="in";
+  document.body.classList.remove("auth");
+  $("#scr-auth").classList.remove("active");
+  document.querySelector("nav").style.display="flex";
+  document.querySelector("header").style.display="flex";
+  document.querySelectorAll("nav button").forEach((b,i)=>b.classList.toggle("active",i===0));
+  document.querySelectorAll(".screen").forEach(s=>s.classList.remove("active"));
+  const plan=$("#scr-plan");plan.classList.add("active","enter");
+  setTimeout(()=>plan.classList.remove("enter"),260);
+  $("#acct-info").textContent = MOCK ? "Presentation mode — no account"
+    : (state.user ? `Signed in as ${state.user.email}` : "Signed in");
+  showIntroIfNew();
+}
+
+/* wipe every trace of the previous account from the DOM — otherwise the next
+   person to sign in on this device sees the last one's plan and pantry */
+function resetUi(){
+  $("#plan-result").hidden=true;
+  ["#meals","#leftover","#variety","#risk","#ticklist"].forEach(s=>$(s).innerHTML="");
+  $("#shop-table tbody").innerHTML="";
+  $("#pantry-list").innerHTML='<div class="empty">Loading…</div>';
+  $("#sl-note").textContent="";$("#gen-status").textContent="";
+  ["#dlg-recipe","#dlg-tick"].forEach(s=>{const d=$(s); if(d.open) d.close();});
+  $("#a-email").value="";$("#a-password").value="";$("#a-name").value="";
+  setMode(false);                          // always return to Sign in
+  clearErrors(); setPwVisible(false);
+}
+function logout(reason){
+  state.token=null;state.user=null;state.plan=null;state.locks.clear();
+  localStorage.removeItem("mm_token");localStorage.removeItem("mm_user");
+  if(MOCK) return;
+  resetUi(); showAuth();
+  if(reason) banner(reason);
+}
+
+/* ---- validation + messaging ---- */
+function clearErrors(){
+  ["#e-email","#e-password"].forEach(s=>$(s).textContent="");
+  ["#a-email","#a-password"].forEach(s=>{$(s).classList.remove("bad");
+                                         $(s).removeAttribute("aria-invalid");});
+  const b=$("#a-banner");b.hidden=true;b.innerHTML="";
+}
+function fieldError(sel, msg){
+  $("#e"+sel.slice(2)).textContent=msg;
+  $(sel).classList.add("bad");$(sel).setAttribute("aria-invalid","true");
+}
+function banner(msg, actionLabel, onAction){
+  const b=$("#a-banner");b.hidden=false;b.textContent=msg;
+  if(actionLabel){
+    const btn=el("button","",actionLabel);btn.type="button";btn.onclick=onAction;
+    b.append(btn);
+  }
+}
+const EMAIL_RE=/^\S+@\S+\.\S+$/;
+
+function setMode(register){
+  registerMode=register;
+  $("#seg-in").setAttribute("aria-selected", String(!register));
+  $("#seg-up").setAttribute("aria-selected", String(register));
+  $("#btn-auth").textContent=register?"Create account":"Sign in";
+  $("#a-name-field").hidden=!register;
+  $("#pw-hint").hidden=!register;
+  $("#a-password").autocomplete=register?"new-password":"current-password";
+  clearErrors(); setPwVisible(false);          // email/password values survive
+}
+$("#seg-in").onclick=()=>setMode(false);
+$("#seg-up").onclick=()=>setMode(true);
+
+function setPwVisible(on){
+  $("#a-password").type=on?"text":"password";
+  $("#pw-toggle").textContent=on?"Hide":"Show";
+  $("#pw-toggle").setAttribute("aria-pressed",String(on));
+  $("#pw-toggle").setAttribute("aria-label",on?"Hide password":"Show password");
+}
+$("#pw-toggle").onclick=()=>setPwVisible($("#a-password").type==="password");
+["#a-email","#a-password"].forEach(s=>$(s).addEventListener("input",()=>{
+  $("#e"+s.slice(2)).textContent="";$(s).classList.remove("bad");
+  $(s).removeAttribute("aria-invalid");}));
+
+$("#auth-form").onsubmit=async(ev)=>{
+  ev.preventDefault();
+  if(authBusy) return;                                   // no double submit
+  const email=$("#a-email").value.trim(), password=$("#a-password").value;
+  clearErrors();
+
+  let firstBad=null;
+  const flag=(sel,msg)=>{fieldError(sel,msg); firstBad=firstBad||sel;};
+  if(!email) flag("#a-email","Enter your email address.");
+  else if(!EMAIL_RE.test(email)) flag("#a-email","That doesn't look like an email address.");
+  if(!password) flag("#a-password","Enter your password.");
+  else if(registerMode && password.length<8) flag("#a-password","Use at least 8 characters.");
+  if(firstBad) return $(firstBad).focus();
+
+  authBusy=true;
+  const wasRegister=registerMode;          // snapshot BEFORE the await
+  const btn=$("#btn-auth");btn.disabled=true;
+  btn.innerHTML=`<span class="spin"></span>${wasRegister?"Creating account…":"Signing in…"}`;
+  try{
+    const body=wasRegister?{email,password,name:$("#a-name").value.trim()}:{email,password};
+    const out=await api(wasRegister?"/auth/register":"/auth/login",
+                        {method:"POST",body:JSON.stringify(body)});
+    state.token=out.token;state.user=out.user;
+    localStorage.setItem("mm_token",out.token);
+    localStorage.setItem("mm_user",JSON.stringify(out.user));
+    if(wasRegister) localStorage.removeItem("mm_seen_intro");
+    $("#a-password").value="";setPwVisible(false);
+    setTimeout(()=>{showApp();toast(wasRegister?"Account created":"Welcome back");},220);
+  }catch(e){
+    if(e.status===409)
+      banner("That email already has an account.","Sign in instead",()=>{
+        setMode(false);$("#a-password").focus();});
+    else if(e.status===401) banner("Wrong email or password.");
+    else if(e.offline){
+      banner(e.message);
+      $("#a-banner").append(el("div","note",`Tried ${API.replace(/^https?:\/\//,"").replace("/api/v1","")}`));
+    }
+    else if(e.field==="email") fieldError("#a-email",e.message);
+    else if(e.field==="password") fieldError("#a-password",e.message);
+    else banner(e.message);
+  }finally{
+    authBusy=false;btn.disabled=false;
+    btn.textContent=registerMode?"Create account":"Sign in";
+  }
+};
+
+/* demo shortcut — only on localhost/LAN, never on a deployed instance */
+(function(){
+  const h=location.hostname;
+  const local=h==="localhost"||h==="127.0.0.1"||/^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/.test(h);
+  if(!local||MOCK) return;
+  const b=$("#btn-demo");b.hidden=false;
+  b.onclick=()=>{setMode(false);$("#a-email").value="demo@mealmind.app";
+    $("#a-password").value="demo1234";$("#auth-form").requestSubmit();};
+})();
+
+$("#btn-logout").onclick=()=>{
+  if(MOCK) return toast("Sign out is disabled in presentation mode");
+  logout();toast("Signed out");
+};
+
+/* first-run explainer: the plan-first flow is backwards from what people expect */
+function showIntroIfNew(){
+  const card=$("#intro-card");
+  if(!card) return;
+  card.hidden = MOCK || localStorage.getItem("mm_seen_intro")==="1";
+}
+$("#btn-intro-ok").onclick=()=>{
+  localStorage.setItem("mm_seen_intro","1");$("#intro-card").hidden=true;
+};
+
+/* ---------- navigation ---------- */
+document.querySelectorAll("nav button").forEach(b=>b.onclick=()=>{
+  document.querySelectorAll("nav button").forEach(x=>x.classList.toggle("active",x===b));
+  document.querySelectorAll(".screen").forEach(s=>s.classList.remove("active"));
+  $("#scr-"+b.dataset.scr).classList.add("active");
+  if (b.dataset.scr==="pantry") loadPantry();
+  if (b.dataset.scr==="settings") loadPrefs();
+});
+
+/* ---------- plan ---------- */
+$("#btn-generate").onclick = async () => {
+  const btn=$("#btn-generate");btn.disabled=true;
+  $("#gen-status").innerHTML='<span class="spin"></span> solving…';
+  try{
+    const body={budget_rs:+$("#f-budget").value, days:+$("#f-days").value, family_size:+$("#f-family").value};
+    if ($("#f-diet").value) body.diet=$("#f-diet").value;
+    if ($("#f-nonveg").value!=="") body.max_nonveg_meals=+$("#f-nonveg").value;
+    const plan = await api("/plans/generate",{method:"POST",body:JSON.stringify(body)});
+    state.plan=plan; state.locks.clear();
+    renderPlan(plan);
+    toast(plan.planner==="llm" ? "Planned with LLM arrangement"
+          : plan.planner_note ? `Planned offline — ${plan.planner_note.slice(0,60)}`
+          : "Planned offline (heuristic)");
+  }catch(e){ if(!e.auth) toast("Could not generate: "+e.message); }
+  btn.disabled=false;$("#gen-status").textContent="";
+};
+
+function renderPlan(p){
+  $("#plan-result").hidden=false;
+  // When the basket is unaffordable nothing is bought, so the spend is 0 —
+  // showing a big "Rs0" reads as "free". Lead with what it would actually cost.
+  const affordable=p.totals.affordable!==false;
+  if(affordable){
+    $("#t-spent").textContent=rs(p.totals.spent_rs);
+    $("#t-spent-lbl").innerHTML=`to spend of <span id="t-budget">${rs(p.totals.budget_rs)}</span> budget`;
+    $("#t-surplus").textContent=rs(p.totals.surplus_value_rs);
+    $("#t-surplus-lbl").textContent="value of pack surplus";
+  }else{
+    $("#t-spent").textContent=p.totals.min_budget_rs?rs(p.totals.min_budget_rs):"—";
+    $("#t-spent-lbl").textContent=`needed — your ${rs(p.totals.budget_rs)} budget can't cover this plan`;
+    $("#t-surplus").textContent="—";
+    $("#t-surplus-lbl").textContent="nothing bought yet";
+  }
+  $("#t-planner").textContent=p.planner==="llm"?"LLM arranged":"heuristic planner";
+  $("#t-planner").title=p.planner==="llm"?"Arranged by the language model"
+    :(p.planner_note||"Deterministic fallback planner");
+  const afford=p.totals.affordable!==false;
+  $("#t-within").textContent=!afford?"can't afford this plan"
+    :p.totals.within_budget?"within budget":"over budget!";
+  $("#t-within").className="badge "+(afford&&p.totals.within_budget?"brand":"danger");
+  const warn=$("#afford-warn");
+  if(!afford){
+    // an infeasible solve buys nothing and costs nothing — never present that
+    // as a free shopping trip
+    const need=p.totals.min_budget_rs;
+    warn.hidden=false;
+    const n=p.shopping_list.filter(i=>i.required_g>0).length;
+    warn.innerHTML=need
+      ? `This plan needs about <b>${rs(need)}</b> to buy — ${rs(p.totals.budget_rs)} isn't enough.`
+        +`<div class="note" style="color:inherit">It spans ${n} different ingredients, and each one`
+        +` has to be bought as a whole pack. Fewer days, or ticking what you already have,`
+        +` cuts that far more than a smaller family size does.</div>`
+      : `This plan can't be bought within ${rs(p.totals.budget_rs)}. Raise the budget or cut the days.`;
+  } else if(p.totals.dropped&&p.totals.dropped.length){
+    warn.hidden=false;
+    warn.textContent=`To fit the budget, these were left off the list: ${p.totals.dropped.map(cap).join(", ")}.`;
+  } else warn.hidden=true;
+  const pct=affordable
+    ? Math.min(100,100*p.totals.spent_rs/p.totals.budget_rs)
+    : 100;                                  // full red bar: the ceiling is blown
+  $("#t-meter").querySelector("i").style.width=pct+"%";
+  $("#t-meter").classList.toggle("warn",!affordable||pct>92);
+
+  const meals=$("#meals");meals.innerHTML="";
+  for(const m of p.meals){
+    const key=m.day+"|"+m.course;
+    if(m.locked) state.locks.add(key);
+    const locked=state.locks.has(key);
+    const card=el("div","meal"+(locked?" locked":""));
+    card.append(el("div","course",`Day ${m.day} · ${m.course}`));
+    card.append(el("div","name",m.recipe_name));
+    const nv=m.diet==="non_vegetarian"?' <span class="badge danger">non-veg</span>'
+      :m.diet==="eggetarian"?' <span class="badge accent">egg</span>':"";
+    card.append(el("div","",`<span class="badge accent cap">${cap(m.cluster)}</span>
+      <span class="badge brand">${m.time_mins} min</span>${nv}`));
+    if(!MOCK){
+      const done=m.cooked;
+      const ck=el("button","cooked-btn",
+        `<span class="box">${done?"✓":""}</span>${done?"Cooked — pantry updated":"I cooked this"}`);
+      ck.type="button";
+      ck.disabled=done;
+      ck.title=done?"Ingredients already drawn from your pantry"
+                   :"Deducts this recipe's ingredients from your pantry";
+      ck.onclick=(e)=>{e.stopPropagation();markCooked(m);};
+      card.classList.toggle("done",done);
+      card.append(ck);
+    }
+    const lock=el("button","lock",locked?"🔒":"🔓");
+    lock.title="Lock this meal before swapping";
+    lock.onclick=(e)=>{e.stopPropagation();locked?state.locks.delete(key):state.locks.add(key);renderPlan(p);};
+    card.append(lock);
+    card.style.cursor="pointer";
+    card.onclick=()=>showRecipe(m, p.family_size);
+    meals.append(card);
+  }
+
+  const SRC_LABEL={live:"live",cache:"cached",seed:"seed"};
+  const SRC_HELP={
+    live:"Fetched just now from the quick-commerce API",
+    cache:"Saved from an earlier live fetch — the API wasn't reachable this time",
+    seed:"Built-in prices from the Agmarknet mandi snapshot (no live API configured)"};
+  const tb=$("#shop-table tbody");tb.innerHTML="";
+  let toBuy=0;
+  for(const i of p.shopping_list){
+    if(i.required_g<=0) continue;
+    if(i.bought_g>0) toBuy++;
+    const sig = i.advice==null ? '<span class="badge">—</span>'
+      : i.advice==="buy_now" ? `<span class="badge danger">▲ ${i.trend_pct}% · buy now</span>`
+      : i.advice==="wait_if_possible" ? `<span class="badge brand">▼ ${i.trend_pct}% · can wait</span>`
+      : `<span class="badge accent">± ${i.trend_pct}%</span>`;
+    const tr=el("tr","",`<td class="cap">${cap(i.commodity)}${i.optional_dropped?' <span class="badge danger">dropped</span>':''}
+      <div class="note">${i.packs.map(pk=>`${pk.count} × ${pk.pack_size_g>=1000?pk.pack_size_g/1000+" kg":pk.pack_size_g+" g"}`).join(", ")||(i.bought_g?"":"pantry covers it")}</div></td>
+      <td class="num">${Math.round(i.required_g)} g</td>
+      <td class="num">${i.bought_g?Math.round(i.bought_g)+" g":"—"}</td>
+      <td class="num">${i.surplus_g?Math.round(i.surplus_g)+" g":"—"}</td>
+      <td class="num">${i.cost_rs?rs(i.cost_rs):"—"}</td>
+      <td><span class="src ${i.price_source}" title="${SRC_HELP[i.price_source]||""}">${SRC_LABEL[i.price_source]||i.price_source}</span></td>
+      <td>${sig}</td>`);
+    tb.append(tr);
+  }
+  const tally={};
+  for(const i of p.shopping_list) tally[i.price_source]=(tally[i.price_source]||0)+1;
+  const where = tally.live ? `${tally.live} priced live from quick commerce`
+    : tally.cache ? `${tally.cache} from cached live prices`
+    : "prices from the built-in Agmarknet data";
+  $("#sl-note").innerHTML=`— ${toBuy} items to buy · <span class="src ${
+    tally.live?"live":tally.cache?"cache":"seed"}">${
+    tally.live?"live":tally.cache?"cached":"offline"}</span> ${where}`;
+
+  const lo=$("#leftover");lo.innerHTML="";
+  if(!p.leftover_plan.length) lo.append(el("div","empty","Nothing extra needed — your surplus fits inside the planned meals."));
+  for(const l of p.leftover_plan){
+    lo.append(el("div","",`<strong>${l.recipe_name}</strong>
+      <span class="badge accent">urgency-value ${l.urgency_value}</span>
+      <div class="note">uses ${Object.entries(l.uses).map(([c,g])=>`${cap(c)} ${Math.round(g)} g`).join(", ")}</div>`));
+  }
+
+  const v=p.variety, vd=$("#variety");vd.innerHTML="";
+  vd.append(el("div","",`<div class="urg"><div class="meter${v.normalised_entropy<0.8?" warn":""}">
+    <i style="width:${Math.round(v.normalised_entropy*100)}%"></i></div>
+    <strong>${v.normalised_entropy}</strong></div>
+    <p class="note">H = ${v.entropy_bits} of ${v.max_entropy_bits} bits over ${v.attainable_clusters}
+    attainable dish families${v.penalties_engaged?" · <b>penalties engaged</b>":""}</p>`));
+  for(const [c,share] of Object.entries(v.distribution))
+    vd.append(el("div","urg",`<span class="cap" style="width:110px">${cap(c)}</span>
+      <div class="meter"><i style="width:${Math.round(share*100)}%"></i></div>
+      <span class="note">${Math.round(share*100)}%</span>`));
+
+  renderRisk(p.decay, $("#risk"));
+}
+
+function renderRisk(d, box){
+  box.innerHTML="";
+  const items=[...d.items].sort((a,b)=>b.urgency-a.urgency).slice(0,7);
+  if(!items.length){box.append(el("div","empty","Pantry is empty."));return;}
+  for(const it of items){
+    box.append(el("div","urg"+(it.urgency>=0.45?" high":""),
+      `<span class="cap" style="width:110px">${cap(it.commodity)}${it.forced_include?" ⚠️":""}</span>
+       <div class="meter"><i style="width:${Math.round(it.urgency*100)}%"></i></div>
+       <span class="note">${Math.round(it.urgency*100)}%</span>`));
+  }
+  if(d.forced_commodities.length)
+    box.append(el("p","note",`⚠️ Forced into today's plan: <b class="cap">${d.forced_commodities.map(cap).join(", ")}</b> — variety penalties can never override this.`));
+}
+
+/* ---------- mark a meal as cooked ---------- */
+async function markCooked(m){
+  if(!state.plan) return;
+  try{
+    const out=await api(`/plans/${state.plan.plan_id}/cooked`,
+      {method:"POST",body:JSON.stringify({day:m.day,course:m.course})});
+    state.plan=out.plan;renderPlan(out.plan);
+    const used=Object.entries(out.used_from_pantry||{});
+    toast(used.length
+      ? `Pantry updated — used ${used.map(([c,g])=>`${Math.round(g)} g ${cap(c)}`).slice(0,3).join(", ")}`
+      : "Marked as cooked — nothing to draw from your pantry yet");
+  }catch(e){ if(!e.auth) toast(e.message); }
+}
+
+/* ---------- recipe sheet ---------- */
+function showRecipe(m, familySize){
+  $("#r-name").textContent=m.recipe_name;
+  $("#r-meta").innerHTML=`<span class="badge accent cap">${cap(m.cluster)}</span>
+    <span class="badge brand">${m.time_mins} min</span>
+    <span class="badge">Day ${m.day} · ${m.course}</span>`;
+  $("#r-for").textContent=familySize?`· for ${familySize}`:"";
+  const box=$("#r-ings");box.innerHTML="";
+  for(const i of (m.ingredients||[]))
+    box.append(el("div","tick",`<span class="cm">${cap(i.commodity)}</span>
+      <span class="note">${i.grams>=1000?(i.grams/1000).toFixed(1).replace(/\.0$/,"")+" kg":Math.round(i.grams)+" g"}</span>`));
+  if(!(m.ingredients||[]).length) box.append(el("div","empty","No ingredient breakdown for this recipe."));
+  const steps=$("#r-steps");steps.innerHTML="";
+  // the CSV writes methods as one blob with no space after full stops —
+  // split into sentences and show as numbered steps
+  const sentences=(m.instructions||"").split(/(?<=\.)\s*(?=[A-Z0-9])/).map(s=>s.trim()).filter(s=>s.length>3);
+  if(sentences.length) sentences.forEach(s=>steps.append(el("li","",s)));
+  else steps.append(el("li","",`No written method for this recipe.`));
+  $("#r-src").innerHTML=m.source_url?`Source: <a href="${m.source_url}" target="_blank" rel="noopener">${new URL(m.source_url).hostname}</a>`:"";
+  const rc=$("#r-cooked");
+  rc.hidden=MOCK;
+  rc.disabled=!!m.cooked;
+  rc.textContent=m.cooked?"Already cooked":"I made this";
+  rc.onclick=()=>{$("#dlg-recipe").close();markCooked(m);};
+  $("#dlg-recipe").showModal();
+}
+
+/* ---------- pantry tick (plan-first flow) ---------- */
+function renderTickList(filter=""){
+  const list=$("#ticklist");list.innerHTML="";
+  const f=filter.trim().toLowerCase();
+  // EVERY commodity the plan needs — not just the ones still being bought, or
+  // the dialog empties out as you tick and you can never untick a mistake
+  const items=state.plan.shopping_list
+    .filter(i=>i.required_g>0)
+    .filter(i=>!f||cap(i.commodity).toLowerCase().includes(f))
+    .sort((a,b)=>(b.pantry_g>0)-(a.pantry_g>0)||a.commodity.localeCompare(b.commodity));
+  for(const i of items){
+    const have=i.pantry_g>0;
+    const amount=Math.round(have?i.pantry_g:i.required_g);
+    // pre-ticked ONLY when it is genuinely in the pantry, and say so — the tick
+    // state is the pantry's state, so Apply with a box cleared removes it
+    const note=have?`<span class="note" style="margin:0;color:var(--green)">in your pantry</span>`
+                   :`<span class="note" style="margin:0">needs ${Math.round(i.required_g)} g</span>`;
+    const row=el("div","tick",
+      `<input type="checkbox" data-c="${i.commodity}"${have?" checked":""}>
+       <span class="cm">${cap(i.commodity)} ${note}</span>
+       <input type="number" value="${amount}" min="0" data-g="${i.commodity}"> g`);
+    list.append(row);
+  }
+  if(!items.length) list.append(el("div","empty",f?"Nothing matches that.":"This plan needs nothing."));
+  const n=state.plan.shopping_list.filter(i=>i.pantry_g>0).length;
+  const total=state.plan.shopping_list.filter(i=>i.required_g>0).length;
+  $("#tick-count").textContent=
+    `${n} of ${total} are already in your pantry (ticked). Applying with a box cleared removes that item.`;
+}
+$("#btn-tick").onclick=()=>{
+  if(!state.plan) return;
+  $("#tick-search").value="";
+  renderTickList();
+  $("#dlg-tick").showModal();
+};
+$("#tick-search").oninput=(e)=>renderTickList(e.target.value);
+const setAllTicks=(on)=>document.querySelectorAll("#ticklist input[type=checkbox]")
+  .forEach(cb=>{cb.checked=on;});
+$("#tick-all").onclick=()=>setAllTicks(true);
+$("#tick-none").onclick=()=>setAllTicks(false);
+$("#btn-apply-ticks").onclick=async()=>{
+  const ticks=[...document.querySelectorAll("#ticklist input[type=checkbox]")].map(cb=>{
+    const qty=+document.querySelector(`#ticklist input[data-g="${cb.dataset.c}"]`).value;
+    // 0 g tells the backend to drop it — that is how unticking works
+    return {commodity:cb.dataset.c,
+            quantity_g: cb.checked ? Math.max(1,qty||1) : 0,
+            storage:"room"};
+  });
+  $("#dlg-tick").close();
+  if(!ticks.length) return;
+  try{
+    const before=state.plan.totals.spent_rs;
+    const wasDropped=new Set(state.plan.shopping_list.filter(i=>i.optional_dropped).map(i=>i.commodity));
+    const plan=await api(`/plans/${state.plan.plan_id}/pantry`,{method:"POST",body:JSON.stringify({ticks})});
+    const saved=before-plan.totals.spent_rs;
+    const restored=[...wasDropped].filter(c=>!plan.shopping_list.some(i=>i.commodity===c&&i.optional_dropped));
+    state.plan=plan;renderPlan(plan);
+    // the total can RISE: freeing budget lets the solver afford items it had
+    // dropped. Say so plainly rather than showing a baffling bigger number.
+    toast(restored.length
+      ? `Added to your pantry — freed budget now covers ${restored.map(cap).join(", ")}`
+      : saved>0 ? `Added to your pantry — you save ${rs(saved)}`
+                : "Added to your pantry — list re-solved");
+  }catch(e){ if(!e.auth) toast("Tick failed: "+e.message); }
+};
+
+/* ---------- swap ---------- */
+$("#btn-swap").onclick=async()=>{
+  if(!state.plan) return;
+  const locked=[...state.locks].map(k=>{const [day,course]=k.split("|");return {day:+day,course};});
+  try{
+    const plan=await api(`/plans/${state.plan.plan_id}/swap`,{method:"POST",body:JSON.stringify({locked})});
+    state.plan=plan;renderPlan(plan);
+    toast(locked.length?`Swapped — kept ${locked.length} locked meal(s)`:"Swapped all meals");
+  }catch(e){ if(!e.auth) toast("Swap failed: "+e.message); }
+};
+
+/* ---------- pantry screen ---------- */
+async function loadPantry(){
+  const box=$("#pantry-list");
+  try{
+    const [items,d]=await Promise.all([api("/pantry"),api("/pantry/decay")]);
+    const urg=Object.fromEntries(d.items.map(i=>[i.pantry_item_id,i]));
+    box.innerHTML="";
+    if(!items.length){box.append(el("div","empty","Nothing here yet. Generate a plan first — anything you tick as already-owned lands here, and the spoilage model starts tracking it from that day."));return;}
+    for(const it of items){
+      const u=urg[it.id];
+      const row=el("div","tick",`<span class="cm"><b>${cap(it.commodity)}</b>
+        <span class="note">${Math.round(it.quantity_g)} g · ${it.storage} · ${u?u.age_days.toFixed(0):"?"} d old
+        ${u&&u.learned_from_observations?' · <span class="badge brand">learned</span>':''}</span></span>`);
+      if(u){
+        const m=el("div","urg"+(u.urgency>=0.45?" high":""),`<div class="meter" style="width:70px"><i style="width:${Math.round(u.urgency*100)}%"></i></div>
+          <span class="note">${Math.round(u.urgency*100)}%</span>`);
+        row.append(m);
+      }
+      const spoil=el("button","tiny warn","Spoiled");
+      const used=el("button","tiny ghost","Used up");
+      spoil.onclick=()=>reportOutcome(it,u,true);
+      used.onclick=()=>reportOutcome(it,u,false);
+      row.append(spoil,used);
+      box.append(row);
+    }
+  }catch(e){ if(e.auth) return; box.innerHTML=`<div class="empty">${e.message}</div>`; }
+}
+async function reportOutcome(item,u,spoiled){
+  try{
+    await api("/pantry/spoilage",{method:"POST",body:JSON.stringify({
+      item_class:item.item_class,storage:item.storage,
+      lifetime_days:Math.max(0.5,u?u.age_days:1),spoiled})});
+    await api(`/pantry/${item.id}`,{method:"DELETE"});
+    toast(spoiled?"Recorded — the model will expect faster spoilage":"Recorded — the model will trust longer shelf life");
+    loadPantry();
+  }catch(e){ if(!e.auth) toast("Failed: "+e.message); }
+}
+$("#btn-add-pantry").onclick=async()=>{
+  const commodity=$("#p-commodity").value.trim().toLowerCase().replaceAll(" ","_");
+  if(!commodity) return toast("Name an item first");
+  try{
+    await api("/pantry",{method:"POST",body:JSON.stringify({
+      commodity,quantity_g:+$("#p-qty").value||100,storage:$("#p-storage").value})});
+    $("#p-commodity").value="";loadPantry();toast("Added "+cap(commodity));
+  }catch(e){ if(!e.auth) toast("Add failed: "+e.message); }
+};
+
+/* ---------- settings ---------- */
+async function loadPrefs(){
+  try{
+    const p=await api("/preferences");
+    $("#s-diet").value=p.diet;$("#s-region").value=p.region;
+    $("#s-time").value=p.max_cook_mins;$("#s-family").value=p.family_size;
+    $("#s-dislikes").value=p.dislikes.join(", ");
+  }catch(e){/* offline */}
+}
+$("#btn-save-prefs").onclick=async()=>{
+  try{
+    await api("/preferences",{method:"PUT",body:JSON.stringify({
+      diet:$("#s-diet").value,region:$("#s-region").value,
+      max_cook_mins:+$("#s-time").value||60,family_size:+$("#s-family").value||4,
+      dislikes:$("#s-dislikes").value.split(",").map(s=>s.trim().toLowerCase().replaceAll(" ","_")).filter(Boolean)})});
+    toast("Preferences saved — they shape the next plan");
+  }catch(e){ if(!e.auth) toast("Save failed: "+e.message); }
+};
+
+/* ---------- boot ---------- */
+$("#modeTag").textContent = MOCK ? "presentation mode (no backend)" : "";
+$("#about-backend").textContent = MOCK ? "Running in MOCK mode — flip MOCK=false in index.html for the live API."
+  : `API: ${API}`;
+COMMODITIES.forEach(c=>{const o=document.createElement("option");o.value=c;$("#commodities").append(o);});
+
+if (!MOCK && !state.token) showAuth();
+else {
+  showApp();
+  // a stored token can be expired or from a wiped database — confirm it with
+  // the server rather than rendering the app around a dead session
+  if (!MOCK) api("/auth/me").then(u=>{
+    state.user=u; localStorage.setItem("mm_user",JSON.stringify(u));
+    $("#acct-info").textContent=`Signed in as ${u.email}`;
+  }).catch(e=>{
+    // api() deliberately skips its auto-logout for /auth/* paths, so an
+    // expired or repudiated token must be handled here or the user is left
+    // inside a session the server no longer honours.
+    if (e.status===401) logout("Your session expired — please sign in again.");
+    // any other failure (backend down) leaves the cached session alone
+  });
+}
+
+/* Service worker updates: claiming a tab does not re-render it, so a shell
+   from a previous deploy would otherwise survive until the second launch. */
+if ("serviceWorker" in navigator) {
+  const hadController = !!navigator.serviceWorker.controller;
+  let reloading = false;
+  const reloadOnce = () => { if(!reloading){ reloading=true; location.reload(); } };
+  navigator.serviceWorker.addEventListener("controllerchange", () => {
+    if (hadController) reloadOnce();          // an upgrade, not a first install
+  });
+  navigator.serviceWorker.addEventListener("message", (e) => {
+    if (e.data === "reload") reloadOnce();
+  });
+  navigator.serviceWorker.register("sw.js", {updateViaCache:"none"}).then((reg) => {
+    reg.update();
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "visible") reg.update();
+    });
+  }).catch(()=>{});
+}
+</script>
+</body>
+</html>

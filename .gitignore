@@ -1,0 +1,53 @@
+# ---- SECRETS: never commit ----
+# backend/.env holds the LLM API key and JWT_SECRET.
+# .env.example is the safe template that IS committed.
+.env
+.env.*
+!.env.example
+
+# ---- user data ----
+# The SQLite database holds real accounts and PBKDF2 password hashes.
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+
+# ---- datasets (~50 MB; the app runs on seeded data without them) ----
+# IndianFoodDatasetCSV, WFP price history, Agmarknet snapshot.
+dataset/
+
+# ---- Python ----
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+build/
+dist/
+.venv/
+venv/
+ENV/
+env/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+coverage.xml
+htmlcov/
+
+# ---- OS / editor ----
+.DS_Store
+.AppleDouble
+Thumbs.db
+desktop.ini
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# ---- logs & scratch ----
+*.log
+tmp/
+scratch/
